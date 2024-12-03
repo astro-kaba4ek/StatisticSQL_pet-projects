@@ -149,3 +149,73 @@ SELECT member, facility, cost
 	ORDER BY cost DESC;
 
 -- 2 СОЕДИНЕНИЯ И ПОДЗАПРОСЫ ---------------------------------------------------------- [END]
+
+
+
+-- 3 ИЗМЕНЕНИЕ ДАННЫХ --------------------------------------------------------------- [BEGIN]
+
+-- 3.1 Добавить новый объект инфраструктуры в клуб:
+--     facid: 9, Name: 'Spa', membercost: 20, 
+--     guestcost: 30, initialoutlay: 100000, monthlymaintenance: 800
+INSERT INTO cd.facilities 
+		(facid, name, membercost, guestcost, initialoutlay, monthlymaintenance)
+	VALUES (9, 'Spa', 20, 30, 100000, 800);
+
+-- 3.2 Добавить несколько новых объектов инфраструктуры в клуб:
+--     facid: 9, Name: 'Spa', membercost: 20, 
+--     guestcost: 30, initialoutlay: 100000, monthlymaintenance: 800;
+--     facid: 10, Name: 'Squash Court 2', membercost: 3.5, 
+--     guestcost: 17.5, initialoutlay: 5000, monthlymaintenance: 80.
+INSERT INTO cd.facilities 
+		(facid, name, membercost, guestcost, initialoutlay, monthlymaintenance)
+	VALUES 
+		(9, 'Spa', 20, 30, 100000, 800),
+		(10, 'Squash Court 2', 3.5, 17.5, 5000, 80);
+
+-- 3.3 Добавить новый объект инфраструктуры в клуб, 
+--     но его номер (facid) вычисляется автоматически:
+--     Name: 'Spa', membercost: 20, 
+--     guestcost: 30, initialoutlay: 100000, monthlymaintenance: 800
+INSERT INTO cd.facilities 
+		(facid, name, membercost, guestcost, initialoutlay, monthlymaintenance)
+	SELECT 
+		(SELECT facid + 1 FROM cd.facilities
+			ORDER BY facid DESC LIMIT 1), 'Spa', 20, 30, 100000, 800;
+
+-- 3.4 Обновить значение первоначальных затрат на 2й теннисном корте (8000 -> 10000)
+UPDATE cd.facilities
+	SET initialoutlay = 10000
+	WHERE name = 'Tennis Court 2';
+
+-- 3.5 Обновить цены на теннисные корты (-> 6 для участников и -> 30 для гостей)
+UPDATE cd.facilities
+	SET membercost = 6, guestcost = 30
+	WHERE name LIKE 'Tennis Court%';
+
+-- 3.6 Обновить цены на 2й теннисный корт так, чтобы он стоил на 10% дороже 1го
+UPDATE cd.facilities
+	SET membercost = (SELECT membercost*1.1 FROM cd.facilities WHERE name = 'Tennis Court 1'),
+		guestcost = (SELECT guestcost*1.1 FROM cd.facilities WHERE name = 'Tennis Court 1')
+	WHERE name = 'Tennis Court 2';
+-- или
+UPDATE cd.facilities fac
+	SET membercost = fac2.membercost * 1.1, guestcost = fac2.guestcost * 1.1
+	FROM (SELECT membercost, guestcost FROM cd.facilities WHERE name = 'Tennis Court 1') fac2
+	WHERE fac.name = 'Tennis Court 2';
+
+-- 3.7 Очистить содержимое таблицы бронирований
+DELETE FROM cd.bookings;
+-- или 
+TRUNCATE cd.bookings;
+
+-- 3.8 Удалить участника №37 т.к. он никогда не совершал бронирований
+DELETE FROM cd.members WHERE memid = 37;
+
+-- 3.9 Удалить всех участников, которые никогда не совершали бронирований
+DELETE FROM cd.members mem 
+	WHERE mem.memid NOT IN (SELECT DISTINCT bks.memid FROM cd.bookings bks);
+-- или
+DELETE FROM cd.members mem
+	WHERE NOT EXISTS (SELECT 1 FROM cd.bookings bks WHERE bks.memid = mem.memid);
+
+-- 3 ИЗМЕНЕНИЕ ДАННЫХ ----------------------------------------------------------------- [END]
