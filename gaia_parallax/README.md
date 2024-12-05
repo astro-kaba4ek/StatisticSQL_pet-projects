@@ -1,0 +1,1 @@
+# Статистическое исследование точности определения параллаксов в каталоге [Gaia DR3](https://gea.esac.esa.int/archive/documentation/GDR3/)
