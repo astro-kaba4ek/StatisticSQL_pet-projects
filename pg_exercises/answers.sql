@@ -219,3 +219,255 @@ DELETE FROM cd.members mem
 	WHERE NOT EXISTS (SELECT 1 FROM cd.bookings bks WHERE bks.memid = mem.memid);
 
 -- 3 ИЗМЕНЕНИЕ ДАННЫХ ----------------------------------------------------------------- [END]
+
+
+
+-- 4 АГРЕГАТОРЫ --------------------------------------------------------------------- [BEGIN]
+-- 4.1 Подсичтать общее количество объектов
+SELECT count(facid) FROM cd.facilities;
+
+-- 4.2 Подсчитать количество объектов, 
+--     стоимость которых для гостей составляет 10 или более долларов
+SELECT count(facid) FROM cd.facilities WHERE guestcost >= 10;
+
+-- 4.3 Подсчитать количество рекомендаций, которые дал каждый участник. 
+--     Упорядочить по ID участника
+SELECT recommendedby, count(*)
+	FROM cd.members
+	WHERE recommendedby IS NOT NULL
+	GROUP BY recommendedby
+	ORDER BY recommendedby;
+
+-- 4.4 Составить список общего количества слотов, забронированных для каждого объекта.
+--     Отсортировать по идентификатору объекта
+SELECT facid, sum(slots) AS "Total Slots"
+	FROM cd.bookings
+	GROUP BY facid
+	ORDER BY slots;
+
+-- 4.5 Составить список общего количества слотов, забронированных для каждого объекта.
+--     В сентябре 2012. Отсортировать по количеству слотов
+SELECT facid, sum(slots) AS "Total Slots"
+	FROM cd.bookings
+	WHERE date(starttime) >= '2012-09-01' AND date(starttime) < '2012-10-01'
+	GROUP BY facid
+	ORDER BY sum(slots);
+
+
+-- 4.6 Составить список общего количества слотов, забронированных для каждого объекта.
+--     В каждом месяце 2012 года отдельно. Отсортировать по количеству слотов и месяцу
+SELECT facid, EXTRACT(MONTH FROM date(starttime)) AS month, sum(slots) AS "Total Slots"
+	FROM cd.bookings
+	WHERE EXTRACT(YEAR FROM date(starttime)) = '2012'
+	GROUP BY facid, month
+	ORDER BY facid, month;
+
+-- 4.7 Общее количество людей, которые следали хотя бы одно бронирование
+SELECT count(DISTINCT memid) FROM cd.bookings;
+
+-- 4.8 Составить список объектов, на которых забронировано более 1000 слотов. 
+--     Отсортированных по идентификатору объектов
+SELECT facid, sum(slots) AS "Total Slots"
+	FROM cd.bookings
+	GROUP BY facid
+	HAVING sum(slots) > 1000
+	ORDER BY facid;
+
+-- 4.9 Составить список объектов с указанием их общего дохода.
+--     Отсортированных по доходу
+SELECT fac.name, sum(CASE
+						WHEN bkg.memid = 0 THEN fac.guestcost * bkg.slots
+						ELSE fac.membercost * bkg.slots
+					END) AS revenue
+	FROM cd.bookings bkg
+		JOIN cd.facilities fac ON bkg.facid = fac.facid
+	GROUP BY fac.name
+	ORDER BY revenue;
+
+-- 4.10 Составить список объектов с общим доходом менее 1000 долларов.
+--      Отсортированных по доходу
+SELECT fac.name, sum(CASE
+						WHEN bkg.memid = 0 THEN fac.guestcost * bkg.slots
+						ELSE fac.membercost * bkg.slots
+					END) AS revenue
+	FROM cd.bookings bkg
+		JOIN cd.facilities fac ON bkg.facid = fac.facid
+	GROUP BY fac.name
+	HAVING sum(CASE
+				WHEN bkg.memid = 0 THEN fac.guestcost * bkg.slots
+				ELSE fac.membercost * bkg.slots
+			END) < 1000
+	ORDER BY revenue;
+-- или
+SELECT name, revenue 
+	FROM (SELECT fac.name, sum(CASE 
+								WHEN bkg.memid = 0 THEN bkg.slots * fac.guestcost
+								ELSE bkg.slots * fac.membercost
+							END) AS revenue
+			FROM cd.bookings bkg
+				JOIN cd.facilities fac ON bkg.facid = fac.facid
+			GROUP BY fac.name
+		) AS agg 
+	WHERE revenue < 1000
+	ORDER BY revenue;  
+
+-- 4.11 Вывести идентификатор объекта, у которого забронировано наибольшее количество слотов
+SELECT facid, sum(slots) AS "Total Slots"
+	FROM cd.bookings
+	GROUP BY facid
+	ORDER BY "Total Slots" DESC
+	LIMIT 1	;
+-- или
+SELECT facid, sum(slots) AS "Total Slots"
+	FROM cd.bookings
+	GROUP BY facid
+	HAVING sum(slots) = (SELECT max(sum1) 
+							FROM (SELECT sum(slots) AS sum1 
+									FROM cd.bookings 
+									GROUP BY facid) 
+							AS agg);
+-- или
+WITH sum_ AS (SELECT facid, sum(slots) AS sum1 
+				FROM cd.bookings 
+				GROUP BY facid)
+SELECT facid, sum1
+	FROM sum_
+	WHERE sum1 = (SELECT max(sum1) FROM sum_);
+
+-- 4.12 Составить список общего количества слотов, забронированных для каждого объекта.
+--      В каждом месяце 2012 года отдельно. Добавить общее количество по одному объекту 
+--      за все месяцы и общее по всем объектам за все время (верхние уровни агрегации).
+--      Отсортировать по количеству слотов и месяцу
+SELECT facid, EXTRACT(MONTH FROM date(starttime)) AS month, sum(slots) AS "Total Slots"
+	FROM cd.bookings
+	WHERE EXTRACT(YEAR FROM date(starttime)) = '2012'
+	GROUP BY ROLLUP (facid, month)
+	ORDER BY facid, month;
+
+-- 4.13 Составить список общего количества часов, забронированных на каждом объекте 
+--      (слот = полчаса). Сортировка по идентификатору объекта. 
+--      Отформатировать количество часов с точностью до двух знаков после запятой
+SELECT fac.facid, fac.name, sum(bkg.slots)*0.50 AS "Total Hours"
+	FROM cd.facilities fac 
+		JOIN cd.bookings bkg ON bkg.facid = fac.facid
+	GROUP BY fac.facid, fac.name
+	ORDER BY fac.facid;
+-- или
+SELECT fac.facid, fac.name, 
+		trim(to_char(sum(bkg.slots)*0.5, '9999999999999999D99')) AS "Total Hours"
+	FROM cd.facilities fac 
+		JOIN cd.bookings bkg ON bkg.facid = fac.facid
+	GROUP BY fac.facid, fac.name
+	ORDER BY fac.facid;
+
+-- 4.14 Составить список всех участников с указанием их имён, идентификаторов 
+--      и первого бронирования после 1 сентября 2012 года. 
+--      Сортировка по идентификатору участника
+SELECT mem.surname, mem.firstname, mem.memid, min(bkg.starttime)
+	FROM cd.members mem JOIN cd.bookings bkg ON bkg.memid = mem.memid
+	WHERE bkg.starttime > '2012-09-01'
+	GROUP BY mem.surname, mem.firstname, mem.memid
+	ORDER BY mem.memid;
+
+-- 4.15 Вывести список имён участников, в каждой строке указав общее количество участников. 
+--      Сортировка по дате вступления
+SELECT (SELECT count(*) FROM cd.members), firstname, surname
+	FROM cd.members
+	ORDER BY joindate;
+-- или
+SELECT count(*) OVER(), firstname, surname
+	FROM cd.members
+	ORDER BY joindate;
+
+-- 4.16 Создать монотонно возрастающий пронумерованный список участников (включая гостей), 
+--      упорядоченный по дате их присоединения
+SELECT row_number() OVER(ORDER BY joindate), firstname, surname FROM cd.members;
+
+-- 4.17 Вывести идентификатор объекта, у которого забронировано наибольшее количество слотов.
+--      Использовать оконные функции
+SELECT facid, "Total"
+	FROM (SELECT facid, sum(slots) AS "Total", rank() OVER(ORDER BY sum(slots) DESC) AS rank
+			FROM cd.bookings
+			GROUP BY facid) AS ranked
+	WHERE rank = 1;
+
+-- 4.18 Составить список участников (включая гостей) с указанием количества часов, 
+--      которые они провели в помещениях, округлённых до ближайших десяти часов. 
+--      Расставить их по рангу в соответствии с этим округлённым значением, 
+--      указав имя, фамилию, округлённое количество часов и ранг. 
+--      Сортировка по рангу, фамилии и имени.
+SELECT mem.firstname, mem.surname, round(sum(bkg.slots*0.5), -1) AS hourse,
+		rank() OVER(ORDER BY round(sum(bkg.slots*0.5), -1) DESC) AS rank
+	FROM cd.members mem JOIN cd.bookings bkg ON mem.memid = bkg.memid
+	GROUP BY mem.memid
+	ORDER BY rank, mem.surname, mem.firstname
+
+-- 4.19 Составить список трёх наиболее прибыльных объектов (включая дублирующие). 
+--      Отсортировать по рейтингу
+SELECT * 
+	FROM (SELECT name, rank() OVER(ORDER BY revenue DESC) AS rank
+			FROM (SELECT fac.name, sum(CASE 
+										WHEN bkg.memid = 0 THEN bkg.slots * fac.guestcost
+										ELSE bkg.slots * fac.membercost
+									END) AS revenue
+					FROM cd.bookings bkg
+						JOIN cd.facilities fac ON bkg.facid = fac.facid
+					GROUP BY fac.name
+					) AS agg 
+			) AS agg2
+	WHERE rank <= 3;
+
+-- 4.20 Разделить объекты на группы одинакового размера с высоким, 
+--      средним и низким доходом в зависимости от их выручки. 
+--      Расположить порядке убывания по классификации и названию
+SELECT name, CASE
+			WHEN revenue_ = 1 THEN 'high'
+			WHEN revenue_ = 2 THEN 'average'
+			WHEN revenue_ = 3 THEN 'low'
+			END AS revenue
+	FROM (SELECT fac.name, 
+				ntile(3) OVER(ORDER BY sum(CASE 
+											WHEN bkg.memid = 0 THEN bkg.slots * fac.guestcost
+											ELSE bkg.slots * fac.membercost
+										END) DESC) AS revenue_
+			FROM cd.bookings bkg JOIN cd.facilities fac ON bkg.facid = fac.facid
+			GROUP BY fac.name) AS agg 
+	ORDER BY revenue_, name;
+
+-- 4.21 Основываясь на имеющихся на данный момент данных за 3 полных месяца, рассчитать, 
+--      сколько времени потребуется каждому объекту, чтобы окупить стоимость владения. 
+--      Вывести название объекта и время окупаемости в месяцах 
+--      в порядке возрастания названий объектов
+SELECT name, initi/(rev-mainten) AS repaytime 
+	FROM (SELECT fac.name AS name,
+				fac.initialoutlay AS initi,
+				fac.monthlymaintenance AS mainten,
+				sum(CASE 
+						WHEN bkg.memid = 0 THEN bkg.slots * fac.guestcost
+						ELSE bkg.slots * fac.membercost
+					END)/3 AS rev
+			FROM cd.bookings bkg JOIN cd.facilities fac ON bkg.facid = fac.facid
+			GROUP BY fac.facid) AS subq
+	ORDER BY name;
+
+-- 4.22 Для каждого дня августа 2012 года рассчитать 
+--      скользящее среднее значение общего дохода за предыдущие 15 дней. 
+--      Результат должен содержать столбцы с датой и доходом, отсортированные по дате
+WITH dailyrev AS (SELECT cast(bkg.starttime AS date) AS date,
+			sum(CASE 
+					WHEN bkg.memid = 0 THEN bkg.slots * fac.guestcost
+					ELSE bkg.slots * fac.membercost
+				END) AS rev
+		FROM cd.bookings bkg JOIN cd.facilities fac ON bkg.facid = fac.facid
+		GROUP BY cast(bkg.starttime AS date))
+SELECT date, avgrev 
+	FROM (SELECT dategen.date AS date,
+				avg(revdata.rev) OVER(ORDER BY dategen.date ROWS 14 PRECEDING) AS avgrev
+			FROM (SELECT cast(generate_series(timestamp '2012-07-10', 
+												'2012-08-31', 
+												'1 day') AS date) AS date) AS dategen
+				LEFT OUTER JOIN dailyrev AS revdata ON dategen.date = revdata.date
+		) AS subq
+	WHERE date >= '2012-08-01'
+ORDER BY date;
+-- 4 АГРЕГАТОРЫ ----------------------------------------------------------------------- [END]
